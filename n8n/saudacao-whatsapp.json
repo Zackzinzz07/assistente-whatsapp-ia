@@ -1,0 +1,111 @@
+{
+  "name": "Saudação WhatsApp - Assistente",
+  "nodes": [
+    {
+      "name": "Mensagem recebida",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        32,
+        96
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "evolution-saudacao",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Evolution webhook"
+        }
+      }
+    },
+    {
+      "name": "Filtrar e montar saudação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        96
+      ],
+      "parameters": {
+        "jsCode": "// A autenticação é feita no nó \"Mensagem recebida\" (Header Auth: x-webhook-token).\n// Eventos sem o token certo nem chegam aqui.\n\nconst INSTANCIA = 'assistente';   // fixa: não confia no nome de instância que vem no corpo\n\n// 1) Pega os dados que a Evolution mandou\nconst body = $input.first().json.body || {};\nconst data = body.data || {};\nconst key = data.key || {};\nconst raw = key.remoteJid || '';\n\n// 2) Ignora o que não é mensagem de uma pessoa pra você\nif (body.event && body.event !== 'messages.upsert') return [];   // outros eventos\nif (key.fromMe) return [];                                        // mensagem que VOCÊ mandou (evita loop)\nif (!raw || raw.endsWith('@g.us') || raw.includes('broadcast') || raw.endsWith('@newsletter')) return []; // grupos, status, canais\n\n// Contatos novos podem vir como \"...@lid\"; só aceita telefone válido (impede envio para destino forjado)\nconst jid = (raw.endsWith('@lid') && (key.remoteJidAlt || key.senderPn)) || raw;\nif (!/^\\d{8,15}@s\\.whatsapp\\.net$/.test(jid)) return [];\n\n// 3) Data e hora de Brasília\nconst agora = new Date();\nconst hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(agora); // AAAA-MM-DD\nconst hora = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hourCycle: 'h23' }).format(agora));\n\n// 4) \"Memória\" do workflow: quem já recebeu a saudação hoje\n//    (só persiste quando o workflow está PUBLICADO/ativo, não em testes manuais)\nconst memoria = $getWorkflowStaticData('global');\nif (memoria.dia !== hoje) {        // virou o dia? zera a lista\n  memoria.dia = hoje;\n  memoria.contatos = {};\n}\nif (memoria.contatos[jid]) return [];  // já falou hoje -> para aqui\nmemoria.contatos[jid] = true;\n\n// 5) Monta a saudação pelo horário\nlet saudacao = 'Boa noite';\nif (hora >= 5 && hora < 12) saudacao = 'Bom dia';\nelse if (hora >= 12 && hora < 18) saudacao = 'Boa tarde';\n\nconst nome = (data.pushName || '').trim().split(' ')[0];\nconst texto = saudacao + (nome ? ', ' + nome : '') + '! 👋 Aqui é o assistente do Salatiel. Ele está ocupado no momento, mas em breve vai falar com você. 😊';\n\nreturn [{ json: { numero: jid.split('@')[0], texto, instancia: INSTANCIA } }];"
+      }
+    },
+    {
+      "name": "Esperar 4s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        544,
+        96
+      ],
+      "parameters": {
+        "amount": 4
+      }
+    },
+    {
+      "name": "Enviar pela Evolution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        816,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://SEU-DOMINIO.ngrok-free.dev/message/sendText/assistente",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.numero, text: $json.texto }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Evolution API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Mensagem recebida": {
+      "main": [
+        [
+          {
+            "node": "Filtrar e montar saudação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar e montar saudação": {
+      "main": [
+        [
+          {
+            "node": "Esperar 4s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar 4s": {
+      "main": [
+        [
+          {
+            "node": "Enviar pela Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

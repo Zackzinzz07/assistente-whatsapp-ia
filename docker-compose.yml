@@ -1,0 +1,82 @@
+# Evolution API v2 + PostgreSQL + Redis + ngrok
+# Todas as configurações (senhas, chaves, URLs) ficam no arquivo .env ao lado.
+
+name: evolution-api   # prefixo dos containers/volumes/rede deste projeto
+
+services:
+  # ---------------------------------------------------------------
+  # A API do WhatsApp em si. Fala com o WhatsApp Web (Baileys) e
+  # expõe uma API REST na porta 8080 + o painel /manager.
+  # ---------------------------------------------------------------
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7   # versão fixa: atualizar é uma decisão sua
+    container_name: evolution_api
+    restart: unless-stopped                   # sobe sozinho quando o Docker iniciar
+    env_file: .env
+    ports:
+      # 127.0.0.1 = só acessível neste PC. A internet chega via ngrok (abaixo).
+      # Para liberar na rede local, troque por "8080:8080".
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - evolution_instances:/evolution/instances   # arquivos de sessão do WhatsApp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------
+  # Banco de dados: guarda instâncias, mensagens, contatos, webhooks.
+  # ---------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: evolution_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Sem "ports": o banco só é visível para os outros containers deste projeto.
+
+  # ---------------------------------------------------------------
+  # Cache rápido em memória (com persistência em disco via AOF).
+  # ---------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: evolution_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------------------------------------------------------------
+  # Túnel público: publica a evolution-api em https://SEU-DOMINIO.ngrok-free.app
+  # ---------------------------------------------------------------
+  ngrok:
+    image: ngrok/ngrok:3-alpine
+    container_name: evolution_ngrok
+    restart: unless-stopped
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    command: ["http", "--url=${NGROK_DOMAIN}", "evolution-api:8080"]
+    ports:
+      - "127.0.0.1:4040:4040"   # painel de inspeção do ngrok (só local)
+    depends_on:
+      - evolution-api
+
+volumes:
+  evolution_instances:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,13 @@
+# Segredos — NUNCA versionar
+.env
+*.env
+!.env.example
+
+# QR codes gerados por scripts/qrcode.sh (dão acesso à sua conta do WhatsApp)
+*.png
+
+# Lixo de sistema/editor
+.DS_Store
+*.swp
+.vscode/
+.idea/
